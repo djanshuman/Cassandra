@@ -1169,7 +1169,179 @@ Token|ByteOffset|
 36 	 |6224 		|
 ________________|
 
-Bloom Filter
+Bloom Filter:
+============
+
+Bloom filter is an optimization technique which is basically the first line of defense
+before searching the partition summary,index and on disk SStables.
+Bloom filter probabilistically checks if an element is present in member set or not.
+It can either return may be present or not. Sometimes it can lead to false positive
+which can cause expensive I/o operation and sstable storage scan. 
+To avoid false positive the array size should be precalculated based on use case. THe higher
+the input the greater space tradeoffs and false negative chances.
+
+Bloom filter is tunable as per our need. The higher the value , the value chances of less filteration
+and false postive as less memory will be used. if the value is less then more memory will be used
+and less chance of false positive. 
 
 
+Datastax optimizations for read path:
+1. No partition summary .
+2. trie data structure are used for partition index and sstables.
+3. Huge performance improvements especially for large sstables.
+4. Existing OSS apache cassandra is seamless and old compacted sstables are converted and written
+using datastax enterprise.
+
+
+Compaction
+==========
+
+Ingesting lot of data leads to lot of unused stale present in older sstables.
+Apache cassandra uses a technique to eliminate all stale records and keep only
+upto date records called COMPACTION.
+
+Reading SSTables:
+
+Bloomfilter->KeyCache->PartitionSummary->PartitionIndex->SSTable
+Bloomfilter->KeyCache->PartitionSummary->PartitionIndex->SSTable
+Bloomfilter->KeyCache->PartitionSummary->PartitionIndex->SSTable
+Bloomfilter->KeyCache->PartitionSummary->PartitionIndex->SSTable
+
+Compaction is the process of combining all these SS-Tables together into one SS-Tables.
+1. Combining Partitions of two SS-Tables.
+
+SS1					Compacted SS table						SS2
+----				------------------						---
+1 Johny(92)			1.Johnny(181)						1.Johnny(181)
+2 Betsy(49)			3.Norman(148)						2.X(176)
+3 Nicholi(85)		4 Sue(41							3.Norman(148)
+4 Sue(41)			5.X(184)							5.X(184)
+5 Sam(96)			6.Henrie(134)						6.Henrie(134)
+												
+				
+Here both SS-tables are compared on Partition token range value across both set.
+1.Apache cassandra stores the timestamp along with row record and here we use timestamp
+to compare which is the stale and recent record.
+2.The Record marked as 'X' is the tombstone and casssandra uses 'X' marker for the deleted one.
+3.Cassandra.yml has the gc_grace_seconds to 10days. So if the tombstone records are older
+then 10 days then on compaction they are not retained and both values from ss1 and ss2 are removed
+and not considered in new ss table.
+
+2. Combining SS Tables
+
+In SS table partitions are ordered. SS tables are immutable so we read the partition
+token compares it and write to a new SS table. While doing this shrinking of size also occurs
+in case stale and tombstone data is present.
+_________________________
+7_|_13___|_18_|__21____|__58__|		 --> SS Table 1
+________________________________________________
+__3__|_7_____|18________|36________| 58______|84|  ----> SS TABLE 2 
+
+SStable1+ SStable2= SStable3
+
+SStable3: Note below size have shrinked for some partitions after removal of stale and tombstone data.
+Also 84 partitions is not present because it contained all tombstone data which had expired gc_grace_period.
+_________________________________________
+_3__|_ 7__|_13___|18___|_21___|36___|58__| 
+
+Now since we have lot of SS tables in our Disk we cant combine all of them into one SS tables. 
+Their exist a strategy as per which compaction takes place for combining tables.
+
+Compaction Strategy
+===================
+
+1.SizeTiered Compaction(default) : Compacts SStables of similar size triggers when similar size are present. Good for write heavy applications.
+2.Leveled Compaction: Good for ready heavy applications. Groups ss tables into levels each of which has a fixed size limit which is 10 times
+greater then the previous level.
+3. TimeWindow compaction: Good for timeseries data.
+
+ALTER TABLE mykeyspace.mytable WITH compaction = {'class':'LeveledCompactionStrategy'};
+
+Demo:
+====
+We inserted 3 rows to apache cassandra and flushed after each insert which created the 3 SSTables.
+Now we inserted 4th row and flushed the memtable.
+We can see in last output that all ss-tables are compacted to single ss-table with aa-5.
+aa3 -> aa5 , aa4 is missing . Actually when we executed flush aa4 got created but all partitions
+in ss tables were compacted to create aa-5 final sstable.
+
+
+cqlsh:killrvideo> insert into videos_by_tag (tag,added_date,video_id,title) values('cassandra',dateof(now()),uuid(),'Cassandra Ninja');
+cqlsh:killrvideo> select * from videos_by_tag ;
+
+ tag       | video_id                             | added_date                      | title
+-----------+--------------------------------------+---------------------------------+------------------
+ cassandra | 5fc5cd0d-aa54-4865-b70e-930d8002f84e | 2020-07-26 20:34:05.558000+0000 | Cassandra Master
+ cassandra | 74cb84c3-55c5-4690-8206-3726aba6ddd7 | 2020-07-26 20:37:15.236000+0000 | Cassandra Genius
+ cassandra | dd9dd5d2-b949-4137-85b7-a275c53e3e98 | 2020-07-26 20:40:47.256000+0000 |  Cassandra Ninja
+ cassandra | f5e78a87-8817-4b2e-9cfc-3fae28401a7a | 2020-07-26 20:38:48.644000+0000 | Cassandra Wizard
+
+(4 rows)
+cqlsh:killrvideo> exit;
+ubuntu@ds201-node1:~$ ls -lrt /home/ubuntu/node/data/data/killrvideo/videos_by_tag-243ec0b1cf7f11eaa962c326c189d3a3/
+total 100
+drwxrwxr-x 2 ubuntu ubuntu 4096 Jul 26 20:32 backups
+-rw-rw-r-- 1 ubuntu ubuntu    0 Jul 26 20:35 aa-1-bti-Rows.db
+-rw-rw-r-- 1 ubuntu ubuntu   16 Jul 26 20:35 aa-1-bti-Filter.db
+-rw-rw-r-- 1 ubuntu ubuntu   49 Jul 26 20:35 aa-1-bti-Partitions.db
+-rw-rw-r-- 1 ubuntu ubuntu    9 Jul 26 20:35 aa-1-bti-Digest.crc32
+-rw-rw-r-- 1 ubuntu ubuntu   75 Jul 26 20:35 aa-1-bti-Data.db
+-rw-rw-r-- 1 ubuntu ubuntu   47 Jul 26 20:35 aa-1-bti-CompressionInfo.db
+-rw-rw-r-- 1 ubuntu ubuntu   94 Jul 26 20:35 aa-1-bti-TOC.txt
+-rw-rw-r-- 1 ubuntu ubuntu 4765 Jul 26 20:35 aa-1-bti-Statistics.db
+-rw-rw-r-- 1 ubuntu ubuntu    0 Jul 26 20:37 aa-2-bti-Rows.db
+-rw-rw-r-- 1 ubuntu ubuntu   16 Jul 26 20:37 aa-2-bti-Filter.db
+-rw-rw-r-- 1 ubuntu ubuntu   49 Jul 26 20:37 aa-2-bti-Partitions.db
+-rw-rw-r-- 1 ubuntu ubuntu   10 Jul 26 20:37 aa-2-bti-Digest.crc32
+-rw-rw-r-- 1 ubuntu ubuntu   75 Jul 26 20:37 aa-2-bti-Data.db
+-rw-rw-r-- 1 ubuntu ubuntu   47 Jul 26 20:37 aa-2-bti-CompressionInfo.db
+-rw-rw-r-- 1 ubuntu ubuntu 4765 Jul 26 20:37 aa-2-bti-Statistics.db
+-rw-rw-r-- 1 ubuntu ubuntu   94 Jul 26 20:37 aa-2-bti-TOC.txt
+-rw-rw-r-- 1 ubuntu ubuntu    0 Jul 26 20:39 aa-3-bti-Rows.db
+-rw-rw-r-- 1 ubuntu ubuntu   16 Jul 26 20:39 aa-3-bti-Filter.db
+-rw-rw-r-- 1 ubuntu ubuntu   49 Jul 26 20:39 aa-3-bti-Partitions.db
+-rw-rw-r-- 1 ubuntu ubuntu    9 Jul 26 20:39 aa-3-bti-Digest.crc32
+-rw-rw-r-- 1 ubuntu ubuntu   75 Jul 26 20:39 aa-3-bti-Data.db
+-rw-rw-r-- 1 ubuntu ubuntu   47 Jul 26 20:39 aa-3-bti-CompressionInfo.db
+-rw-rw-r-- 1 ubuntu ubuntu 4765 Jul 26 20:39 aa-3-bti-Statistics.db
+-rw-rw-r-- 1 ubuntu ubuntu   94 Jul 26 20:39 aa-3-bti-TOC.txt
+ubuntu@ds201-node1:~$ /home/ubuntu/node/resources/cassandra/bin/nodetool flush
+ubuntu@ds201-node1:~$ ls -lrt /home/ubuntu/node/data/data/killrvideo/videos_by_tag-243ec0b1cf7f11eaa962c326c189d3a3/
+total 36
+drwxrwxr-x 2 ubuntu ubuntu 4096 Jul 26 20:32 backups
+-rw-rw-r-- 1 ubuntu ubuntu    0 Jul 26 20:41 aa-5-bti-Rows.db
+-rw-rw-r-- 1 ubuntu ubuntu   49 Jul 26 20:41 aa-5-bti-Partitions.db
+-rw-rw-r-- 1 ubuntu ubuntu   16 Jul 26 20:41 aa-5-bti-Filter.db
+-rw-rw-r-- 1 ubuntu ubuntu   10 Jul 26 20:41 aa-5-bti-Digest.crc32
+-rw-rw-r-- 1 ubuntu ubuntu  207 Jul 26 20:41 aa-5-bti-Data.db
+-rw-rw-r-- 1 ubuntu ubuntu   55 Jul 26 20:41 aa-5-bti-CompressionInfo.db
+-rw-rw-r-- 1 ubuntu ubuntu   94 Jul 26 20:41 aa-5-bti-TOC.txt
+-rw-rw-r-- 1 ubuntu ubuntu 4765 Jul 26 20:41 aa-5-bti-Statistics.db
+
+cqlsh:killrvideo> desc videos_by_tag ;
+
+CREATE TABLE killrvideo.videos_by_tag (
+    tag text,
+    video_id uuid,
+    added_date timestamp,
+    title text,
+    PRIMARY KEY (tag, video_id)
+) WITH CLUSTERING ORDER BY (video_id ASC)
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = ''
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND dclocal_read_repair_chance = 0.1
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND read_repair_chance = 0.0
+    AND speculative_retry = '99PERCENTILE';
+
+Here SizeTieredCompaction by default is used so all 4 rows of single record we inserted were of same size
+and created 4 ss-tables. Min_threshold is 4 thats why compaction triggred to create a new compacted SS table.
 
