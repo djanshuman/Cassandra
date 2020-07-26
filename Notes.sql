@@ -852,14 +852,14 @@ Whenever the node goes down the commit log is replayed to read the entire mutati
 and node is ready then to serve the request.
 
 ________________________________________
-|RAM									                  |		
-|	 MEMTABLE							                |
-|			 4 Igot Your Data TX Austin	      |				
-|			 2 ComeTo Dse  	  TX Dallas	      |
-|			 1 Dev Awesome 	  TX Houston      |
-|			 3 Lone Node   	  TX Snyder	      |					
-|										                    |					
-|										                    |					
+|RAM									|		
+|	 MEMTABLE							|
+|			 4 Igot Your Data TX Austin	|				
+|			 2 ComeTo Dse  	  TX Dallas	|
+|			 1 Dev Awesome 	  TX Houston|
+|			 3 Lone Node   	  TX Snyder	|					
+|										|					
+|										|					
 |_______________________________________|
 
 --->1 Dev Awesome TX Houston
@@ -868,12 +868,12 @@ ________________________________________
 --->4 Igot Your Data TX Austin
 
 _________________________________________
-|HDD								   	                |
-|	COMMIT LOG							              |
-|			1 Dev Awesome    TX Houston	      |
-|			2 ComeTo Dse     TX Dallas	      |
-|			3 Lone Node   	 TX Snyder	      |
-|   		4 Igot Your Data TX Austin      |
+|HDD								   	|
+|	COMMIT LOG							|
+|			1 Dev Awesome    TX Houston	|
+|			2 ComeTo Dse     TX Dallas	|
+|			3 Lone Node   	 TX Snyder	|
+|   		4 Igot Your Data TX Austin  |
 |_______________________________________|
 
 5. These are all Highlevel implementations and it might seems that apache cassandra does 
@@ -894,13 +894,13 @@ request and handled in background. The flushing of Memtable repeats as it happen
 and now we have two data sets and two SStable in HDD. Both together forms the entire dataset.
 
 ________________________________________________________________________
-|HDD								   									                                |
-|	SS table1  								        SS table2					                  |
-|			1 Dev Awesome    TX Houston		5 Data Rowman TX Austin		          |
-|			2 ComeTo Dse     TX Dallas		7 Prepar Query TX Austin	          | 
-|			3 Lone Node   	 TX Snyder		6 Cluster Rows TX Dallas	          |
-|   	4 Igot Your Data TX Austin 	 	10 Learnin Model TX Housten	        |						
-|											              9 Bytes lover TX Housten            |
+|HDD								   									|
+|	SS table1  								SS table2					|
+|			1 Dev Awesome    TX Houston		5 Data Rowman TX Austin		|
+|			2 ComeTo Dse     TX Dallas		7 Prepar Query TX Austin	|
+|			3 Lone Node   	 TX Snyder		6 Cluster Rows TX Dallas	|
+|   		4 Igot Your Data TX Austin 	 	10 Learnin Model TX Housten	|						
+|											9 Bytes lover TX Housten    |
 |_______________________________________________________________________|					
 
 Ideally: Cassandra recommends below architecture where the HDD1 is the separate hard disk
@@ -909,36 +909,36 @@ The HDD holds only the temporary commit log always. Once SS table is flushed to 
 log wipes up.
 
 ____________________
-|RAM				        |	
-|	 MEMTABLE		      |
-|	 -------		      |				
-|	 -------		      | 
-|	 -------		      |
-|			 		          |
-|					          |					
-|					          |					
+|RAM				|	
+|	 MEMTABLE		|
+|	 -------		|				
+|	 -------		| 
+|	 -------		|
+|			 		|
+|					|					
+|					|					
 |___________________|
 
 ---> ----
 ---> ----
 ---> ----
 ________________
-|HDD			      |		
-|	COMMIT LOG	  |				
-|	------	   	  |
-|	------		    |	
-|	------		    |	
-|   		 	      |		
+|HDD			|		
+|	COMMIT LOG	|				
+|	------	   	|
+|	------		|	
+|	------		|	
+|   		 	|		
 |_______________|
 _________________________________________ 	________________________________
-|HDD1								   	                |   | 						                  |
-|	SS table1 						                | 	|	SS table2				              |
-|			1 Dev Awesome    TX Houston	      | 	|	5 Data Rowman TX Austin		    |
-|			2 ComeTo Dse     TX Dallas	      |+  |	7 Prepar Query TX Austin	    | = Our entire Dataset and read request is done on this dataset.
-|			3 Lone Node   	 TX Snyder	      | 	|	6 Cluster Rows TX Dallas	    | 
-|   		4 Igot Your Data TX Austin 	    | 	|	10 Learnin Model TX Housten	  |						
-|										                    | 	|	9 Bytes lover TX Housten      |
-|_______________________________________| 	| ______________________________|	
+|HDD1								   	 |  | 						        |
+|	SS table1 						     | 	|	SS table2					|
+|			1 Dev Awesome    TX Houston	 | 	|	5 Data Rowman TX Austin		|
+|			2 ComeTo Dse     TX Dallas	 |+ |	7 Prepar Query TX Austin	| = Our entire Dataset and read request is done on this dataset.
+|			3 Lone Node   	 TX Snyder	 | 	|	6 Cluster Rows TX Dallas	|
+|   		4 Igot Your Data TX Austin 	 | 	|	10 Learnin Model TX Housten	|						
+|										 | 	|	9 Bytes lover TX Housten    |
+|________________________________________| 	| ______________________________|	
 
 
 
