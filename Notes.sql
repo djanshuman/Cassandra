@@ -934,12 +934,242 @@ _________________________________________ 	________________________________
 |HDD1								   	 |  | 						        |
 |	SS table1 						     | 	|	SS table2					|
 |			1 Dev Awesome    TX Houston	 | 	|	5 Data Rowman TX Austin		|
-|			2 ComeTo Dse     TX Dallas	 |+ |	7 Prepar Query TX Austin	| = Our entire Dataset and read request is done on this dataset.
+|			2 ComeTo Dse     TX Dallas	 |+ |	7 Prepar Query TX Austin	| = Our entire Dataset and read request is done on this dataset + Current Memtable(to be flushed).
 |			3 Lone Node   	 TX Snyder	 | 	|	6 Cluster Rows TX Dallas	|
 |   		4 Igot Your Data TX Austin 	 | 	|	10 Learnin Model TX Housten	|						
 |										 | 	|	9 Bytes lover TX Housten    |
 |________________________________________| 	| ______________________________|	
 
+Demo: We used cassandra-stress to write some 250000 records to our node. 
+
+ubuntu@ds201-node1:~$ /home/ubuntu/node/resources/cassandra/tools/bin/cassandra-stress write no-warmup n=250000 -port native=9041 -rate threads=1
+******************** Stress Settings ********************
+Command:
+
+
+Results:
+Op rate                   :    1,182 op/s  [WRITE: 1,182 op/s]
+Partition rate            :    1,182 pk/s  [WRITE: 1,182 pk/s]
+Row rate                  :    1,182 row/s [WRITE: 1,182 row/s]
+Latency mean              :  0.826 ms [WRITE: 0.8 ms]
+Latency median            :  0.526 ms [WRITE: 0.5 ms]
+Latency 95th percentile   :  1.572 ms [WRITE: 1.6 ms]
+Latency 99th percentile   :  8.253 ms [WRITE: 8.3 ms]
+Latency 99.9th percentile : 19.055 ms [WRITE: 19.1 ms]
+Latency max               : 157.549 ms [WRITE: 157.5 ms]
+Total partitions          :    250,000 [WRITE: 250,000]
+Total errors              :          0 [WRITE: 0]
+Total GC count            : 16
+Total GC memory           : 4.616 GiB
+Total GC time             :    0.7 seconds
+Avg GC time               :   42.4 ms
+StdDev GC time            :   31.1 ms
+Total operation time      : 00:03:31
+
+END
+
+The write is successful as per above logs. Now notice the below output.
+Here cassandra-stress created a keyspace (Keyspace1) and a table standard1.
+1. Analyse the Write Count which is exactly same number of records we wrote. Then ss table size is 2 now.
+2. Analyse the Memtable, Bloom filter stats.
+
+Now we will flush the memtable to disk using nodetool flush command and will notice change in SSTABLE count,
+memtable count etc.
+
+
+ubuntu@ds201-node1:~$ /home/ubuntu/node/resources/cassandra/bin/nodetool cfstats keyspace1.standard1
+Total number of tables: 47
+----------------
+Keyspace : keyspace1
+	Read Count: 0
+	Read Latency: NaN ms
+	Write Count: 250000
+	Write Latency: 0.01978796 ms
+	Pending Flushes: 0
+		Table: standard1
+		SSTable count: 2
+		Space used (live): 57272552
+		Space used (total): 57272552
+		Space used by snapshots (total): 0
+		Off heap memory used (total): 296336
+		SSTable Compression Ratio: -1.0
+		Number of partitions (estimate): 251700
+		Memtable cell count: 10903
+		Memtable data size: 3041937
+		Memtable off heap memory used: 0
+		Memtable switch count: 8
+		Local read count: 0
+		Local read latency: NaN ms
+		Local write count: 250000
+		Local write latency: 0.018 ms
+		Pending flushes: 0
+		Percent repaired: 0.0
+		Bytes repaired: 0.000KiB
+		Bytes unrepaired: 52.214MiB
+		Bytes pending repair: 0.000KiB
+		Bloom filter false positives: 0
+		Bloom filter false ratio: 0.00000
+		Bloom filter space used: 296352
+		Bloom filter off heap memory used: 296336
+		Index summary off heap memory used: 0
+		Compression metadata off heap memory used: 0
+		Compacted partition minimum bytes: 180
+		Compacted partition maximum bytes: 258
+		Compacted partition mean bytes: 258
+		Average live cells per slice (last five minutes): NaN
+		Maximum live cells per slice (last five minutes): 0
+		Average tombstones per slice (last five minutes): NaN
+		Maximum tombstones per slice (last five minutes): 0
+		Dropped Mutations: 0
+		Failed Replication Count: null
+
+----------------
+ubuntu@ds201-node1:~$ /home/ubuntu/node/resources/cassandra/bin/nodetool flush
+ubuntu@ds201-node1:~$ /home/ubuntu/node/resources/cassandra/bin/nodetool cfstats keyspace1.standard1
+Total number of tables: 47
+----------------
+Keyspace : keyspace1
+	Read Count: 0
+	Read Latency: NaN ms
+	Write Count: 250000
+	Write Latency: 0.01978796 ms
+	Pending Flushes: 0
+		Table: standard1
+		SSTable count: 3
+		Space used (live): 59861561
+		Space used (total): 59861561
+		Space used by snapshots (total): 0
+		Off heap memory used (total): 309968
+		SSTable Compression Ratio: -1.0
+		Number of partitions (estimate): 252151
+		Memtable cell count: 0
+		Memtable data size: 0
+		Memtable off heap memory used: 0
+		Memtable switch count: 9
+		Local read count: 0
+		Local read latency: NaN ms
+		Local write count: 250000
+		Local write latency: 0.018 ms
+		Pending flushes: 0
+		Percent repaired: 0.0
+		Bytes repaired: 0.000KiB
+		Bytes unrepaired: 54.581MiB
+		Bytes pending repair: 0.000KiB
+		Bloom filter false positives: 0
+		Bloom filter false ratio: 0.00000
+		Bloom filter space used: 309992
+		Bloom filter off heap memory used: 309968
+		Index summary off heap memory used: 0
+		Compression metadata off heap memory used: 0
+		Compacted partition minimum bytes: 180
+		Compacted partition maximum bytes: 258
+		Compacted partition mean bytes: 258
+		Average live cells per slice (last five minutes): NaN
+		Maximum live cells per slice (last five minutes): 0
+		Average tombstones per slice (last five minutes): NaN
+		Maximum tombstones per slice (last five minutes): 0
+		Dropped Mutations: 0
+		Failed Replication Count: null
+
+----------------
+As noticed the memtable count becomes 0 and sstable increased to 3.
+
+READ PATH
+=========
+Read happens from Memtable as well as SStable.
+
+client
+----->		Memtable --->	SSTABLE1
+							SSTABLE2
+							SSTABLE3
+			
+Read from Memtable (RAM):
+Memtable reads are fast . In memtable records are stored first my partition key then via 
+clustering column. So whenever read request comes it direct sends the data by location
+partition key. Its a binary search so O(logn). 
+
+			24  		 4 Igot Your Data TX 				
+						 2 ComeTo Dse  	  TX 
+58 read	request		 	 1 Dev Awesome 	  TX 
+--->\			 		 3 Lone Node   	  TX 
+	  \		
+		\__58			5 Data Rowman   NY
+						7 Prepar Query  NY
+						6 Cluster Rows  NY
+	
+
+			83			10 Learnin Model CA
+						9 Bytes lover    CA
+READ from SSTABLE(HDD):
+ 1.SStable are stored in disk. 
+ 2.The partitions are actual stored in file with Offset values. The parition can be of varied length
+ 
+SAMPLE SSTABLE:
+7 partition is present at offset 0, 13 at 1120, 58 at offset 7192.
+ 
+0___1120____3528____4392_____6224________7192_______9120_
+| 7 | 13    |18 	|21   	|36			|58		|	92	 |
+|___|_______|_______|_______|___________|_______|________|
+			
+Now Apache cassandra maintains a PARTITION INDEX to optimise this. Whenever search 
+request comes we can query the index and directly seek to that offset and streams the data
+back to client.
+
+HDD
+____________________
+Token 	| ByteOffset| 
+7	  	| 	0		|
+13		|	1120	|
+18		|	3528	|
+21		|	4392	|
+36		|	6224	|
+58		|	7192	|
+93		|	9120	|
+____________________|
+Now the above Mechanism of SSTABLE offset read using Partition index is helpful when token
+range is smaller , but as we are storing in an actual Hard disk there can be huge number of partitions
+and the index table can be too long and querying token by token is time consuming.
+
+Apache cassandra uses one more optimisation technique of partition summary in RAM and not in HDD. Here
+we notify the initial starting offset for a range of tokens. The read request search can happen only
+between the range and can directly start by seeking to that offset instead of doing a linear search.
+So the overall illustration looks as below:
+	
+RAM (Partition summary):
+						____________________									
+|						TOKEN | ByteOffset	|
+|__36(read request)-> 	0-20  | 0			|
+						21-55 | 32			|---
+						56-100| 48			|	|
+						_____________________	| directly search to 32 index  for 36 token
+												|
+								 			____________________
+HDD (Partition index): 						Token 	| ByteOffset| 
+										0->	7	  	| 	0		|
+											13		|	1120	|
+											18		|	3528	|
+										32->21		|	4392	|
+											36		|	6224	|
+										48->58		|	7192	|---
+											93		|	9120	|  | Finds from partition index
+											____________________|  | 36 present in 6224 index.	
+																  /							
+								0___1120____3528____4392_____6224________7192_______9120_
+								| 7 | 13    |18 	|21   	|36			|58		|	92	 |
+								|___|_______|_______|_______|___________|_______|________|
+
+Now reads the data from offset and streams the data back to client.
+Apache cassandra always maintains a datastructure KEY CACHE for caching keys/partition which are
+most often asked in request. So we can bypass the partition index, partition summary
+and direct query the SS table to stream offset data to client. 
+
+Key Cache:
+________________
+Token|ByteOffset|
+36 	 |6224 		|
+________________|
+
+Bloom Filter
 
 
 
