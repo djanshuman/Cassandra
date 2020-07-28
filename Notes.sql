@@ -1172,18 +1172,6 @@ ________________|
 Bloom Filter:
 ============
 
-Bloom filter is an optimization technique which is basically the first line of defense
-before searching the partition summary,index and on disk SStables.
-Bloom filter probabilistically checks if an element is present in member set or not.
-It can either return may be present or not. Sometimes it can lead to false positive
-which can cause expensive I/o operation and sstable storage scan. 
-To avoid false positive the array size should be precalculated based on use case. THe higher
-the input the greater space tradeoffs and false negative chances.
-
-Bloom filter is tunable as per our need. The higher the value , the value chances of less filteration
-and false postive as less memory will be used. if the value is less then more memory will be used
-and less chance of false positive. 
-
 
 Datastax optimizations for read path:
 1. No partition summary .
@@ -1344,4 +1332,88 @@ CREATE TABLE killrvideo.videos_by_tag (
 
 Here SizeTieredCompaction by default is used so all 4 rows of single record we inserted were of same size
 and created 4 ss-tables. Min_threshold is 4 thats why compaction triggred to create a new compacted SS table.
+
+Performance 
+===========
+
+Open Source Apache cassandra:
+-----------------------------
+1. One thread per task.
+2. Uses thread pools . So on each task it pulls thread from pool recycle it and use it.
+OS system thread management also kickstarts in for premption ,pause,resume threads as task proceeds.
+	i.One per task
+	ii.Reads
+	iii.Writes
+	iv.etc
+3. Causes thread retention.
+4  More thread causes more issue as CPU Overheads in maintaining the threads instead of focusing on task.
+5. Bottlenecks happens when thread are shared in pools among task for read,write etc.
+6. Now a days instead of faster cpu we have more cores.
+7. Thread loses affinity to core as they are shared.
+
+
+Datastax Performance Gain
+-------------------------
+1. Underlying architectural changes.
+2. Enhances vertical scaling via more cores.
+3. One thread per core. 
+4. Num_of_threads= No_of_core -1  ( Extra Core is for task management activity)
+5. Thread maintains affinity to core.
+6. OS dont have to pull threads and push threads.
+7. Threads never block.
+
+Asynchronous Reads and writes:
+Writes:
+1. Each thread gets its Memtable section to write to
+2. Writes divided by token amongst available threads.
+Reads:
+1. All accesses are serial.
+2. Pushes core to 100% usage without any contention.
+
+Extra core is for Low contention areas and OS needs/task management activities like:
+1. Memtable flush.
+2. Compaction
+3. Hints
+4. Streaming
+
+
+BLOOM FILTER
+============
+
+Bloom filter is a space efficient probablistic datastructure which is used to determine whether an element
+is present or not in a member set. When we search for an element the query returns "May be present" or "May not"
+but wont return false if the element is present. False positive is accepted but false negative is not accepted.
+It uses a array bit structure having values 0 or 1 of size m. It has k hash function to which we feed n string.
+Each hash function on feeding n strings generate a value, we take mod of that value with size m to determine
+array position and toggle it to 1 ie. k=f(n)=result mod m = array index pos
+
+1.We search for an element and in the set, we check all the mod values and if atleast one index having '1' found
+then "element may be present" . Now cassandra searches for the element in the memtable then on sstable disk and
+if it doesn't found then it is false positive. 
+2. False positive occurs when array saturates soon and size of array is quite less, it will then lead to overlapping
+and more false positive. Therefore based on use cases we should determine our m , k,n
+
+3. Bloom filter reduces expensive I/O on disk and save for unnecessary disk scans. It is kind of first line of
+defence before we deep dive to actual hDD for performing the search.
+
+4. Bloom filter tradeoff spaces. More spaces is required to get a more optimized and accurate bloom filter algorithm.
+THe higher the percentage and array size more chances of false positive.
+
+https://medium.com/datadriveninvestor/bloom-filter-a-simple-but-interesting-data-structure-37fd53b11606
+
+Bloom filter is an optimization technique which is basically the first line of defense
+before searching the partition summary,index and on disk SStables.
+Bloom filter probabilistically checks if an element is present in member set or not.
+It can either return may be present or not. Sometimes it can lead to false positive
+which can cause expensive I/o operation and sstable storage scan. 
+To avoid false positive the array size should be precalculated based on use case. THe higher
+the input the greater space tradeoffs and false negative chances.
+
+Bloom filter is tunable as per our need. The higher the value , the value chances of less filteration
+and false postive as less memory will be used. if the value is less then more memory will be used
+and less chance of false positive. 
+
+
+
+
 
